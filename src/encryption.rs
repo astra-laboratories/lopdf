@@ -238,11 +238,20 @@ where
         }
     };
 
+    if encrypted.is_empty() {
+        return Ok(Vec::new());
+    }
+    if encrypted.len() % 2 != 0 {
+        return Ok(Vec::new());
+
+    }
+
     if aes {
         let mut iv = [0x00u8; 16];
         for (elem, i) in encrypted.iter().zip(0..16) {
             iv[i] = *elem;
         }
+
         // Decrypt using the aes algorithm
         let data = &mut encrypted[16..].to_vec();
         let pt = Aes128CbcDec::new(rc4_key.into(), &iv.into())
