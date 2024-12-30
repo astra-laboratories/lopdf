@@ -1,6 +1,10 @@
 use crate::rc4::Rc4;
 use crate::{Document, Object, ObjectId};
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+use aes::cipher::{
+    block_padding::{Pkcs7, UnpadError},
+    crypto_common::BlockSizeUser,
+    BlockDecryptMut, KeyIvInit,
+};
 use md5::{Digest as _, Md5};
 use thiserror::Error;
 
@@ -32,6 +36,14 @@ pub enum DecryptionError {
 
     #[error("the document uses an encryption scheme that is not implemented in lopdf")]
     UnsupportedEncryption,
+    #[error("data is not padded to a multiple of the block size")]
+    InvalidPadding,
+}
+
+impl From<UnpadError> for DecryptionError {
+    fn from(_error: UnpadError) -> Self {
+        Self::InvalidPadding
+    }
 }
 
 const PAD_BYTES: [u8; 32] = [
@@ -212,10 +224,14 @@ pub fn decrypt_object<Key>(key: Key, obj_id: ObjectId, obj: &Object, aes: bool) 
 where
     Key: AsRef<[u8]>,
 {
+    // (0..n) ->  key
+    // (n..n + 3) -> object number's first 3 bytes
+    // (n + 3..n + 5) -> object generation number's first 2 bytes
+    // (n + 5..n + 9) -> only for AES [0x73, 0x41, 0x6C, 0x54]
     let key = key.as_ref();
     let len = if aes { key.len() + 9 } else { key.len() + 5 };
     let mut builder = Vec::<u8>::with_capacity(len);
-    builder.extend_from_slice(key.as_ref());
+    builder.extend_from_slice(key);
 
     // Extend the key with the lower 3 bytes of the object number
     builder.extend_from_slice(&obj_id.0.to_le_bytes()[..3]);
@@ -223,12 +239,11 @@ where
     builder.extend_from_slice(&obj_id.1.to_le_bytes()[..2]);
 
     if aes {
-        builder.append(&mut vec![0x73, 0x41, 0x6C, 0x54]);
+        builder.extend_from_slice(&[0x73, 0x41, 0x6C, 0x54]);
     }
-
-    // Now construct the rc4 key
+    // Now construct the decryption key
     let key_len = std::cmp::min(key.len() + 5, 16);
-    let rc4_key = &Md5::digest(builder)[..key_len];
+    let decryption_key = &Md5::digest(&builder)[..key_len];
 
     let encrypted = match obj {
         Object::String(content, _) => content,
@@ -238,29 +253,20 @@ where
         }
     };
 
-    if encrypted.is_empty() {
-        return Ok(Vec::new());
-    }
-    if encrypted.len() % 2 != 0 {
-        return Ok(Vec::new());
-
-    }
-
     if aes {
-        let mut iv = [0x00u8; 16];
-        for (elem, i) in encrypted.iter().zip(0..16) {
-            iv[i] = *elem;
-        }
-
+        let iv = encrypted.get(0..16).unwrap_or(&[0u8; 16]);
         // Decrypt using the aes algorithm
-        let data = &mut encrypted[16..].to_vec();
-        let pt = Aes128CbcDec::new(rc4_key.into(), &iv.into())
-            .decrypt_padded_mut::<Pkcs7>(data)
-            .unwrap();
-        Ok(pt.to_vec())
+        let mut data = encrypted.get(16..).map(|enc| enc.to_vec()).unwrap_or_default();
+        if data.len() % 16 != 0 {
+            Ok(data)
+        } else {
+            let pt = Aes128CbcDec::new(decryption_key.into(), iv.into()).decrypt_padded_mut::<Pkcs7>(&mut data)?;
+            println!("{:?}", String::from_utf8_lossy(pt));
+            Ok(pt.to_vec())
+        }
     } else {
         // Decrypt using the rc4 algorithm
-        Ok(Rc4::new(rc4_key).decrypt(encrypted))
+        Ok(Rc4::new(decryption_key).decrypt(encrypted))
     }
 }
 

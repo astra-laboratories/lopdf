@@ -269,13 +269,13 @@ impl Document {
 
         let key = encryption::get_encryption_key(self, &password, true)?;
         let cfm = self
-            .get_encrypted()?
-            .get(b"CF")?
-            .as_dict()?
-            .get(b"StdCF")?
-            .as_dict()?
-            .get(b"CFM")?
-            .as_name()
+            .get_encrypted()
+            .and_then(|enc| enc.get(b"CF"))
+            .and_then(|cf| cf.as_dict())
+            .and_then(|dict| dict.get(b"StdCF"))
+            .and_then(|stdcf| stdcf.as_dict())
+            .and_then(|dict| dict.get(b"CFM"))
+            .and_then(|cfm| cfm.as_name())
             .unwrap_or_default();
         let is_aes = cfm == b"AESV2";
         for (&id, obj) in self.objects.iter_mut() {
