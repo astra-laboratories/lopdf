@@ -267,7 +267,7 @@ impl Document {
             .and_then(|o| o.as_bool())
             .unwrap_or(true);
 
-        let key = encryption::get_encryption_key(self, &password, true)?;
+        let key = dbg!(encryption::get_encryption_key(self, &password, true)?);
         let cfm = self
             .get_encrypted()
             .and_then(|enc| enc.get(b"CF"))

@@ -224,6 +224,7 @@ pub fn decrypt_object<Key>(key: Key, obj_id: ObjectId, obj: &Object, aes: bool) 
 where
     Key: AsRef<[u8]>,
 {
+    let key = [];
     // (0..n) ->  key
     // (n..n + 3) -> object number's first 3 bytes
     // (n + 3..n + 5) -> object generation number's first 2 bytes
@@ -233,15 +234,16 @@ where
     let mut builder = Vec::<u8>::with_capacity(len);
     builder.extend_from_slice(key);
 
-    // Extend the key with the lower 3 bytes of the object number
+    // extend the key with the lower 3 bytes of the object number
     builder.extend_from_slice(&obj_id.0.to_le_bytes()[..3]);
     // and the lower 2 bytes of the generation number
     builder.extend_from_slice(&obj_id.1.to_le_bytes()[..2]);
 
     if aes {
+        // add "sAlT" in hexadecimal format to AES 
         builder.extend_from_slice(&[0x73, 0x41, 0x6C, 0x54]);
     }
-    // Now construct the decryption key
+    //construct the decryption key
     let key_len = std::cmp::min(key.len() + 5, 16);
     let decryption_key = &Md5::digest(&builder)[..key_len];
 
@@ -257,11 +259,12 @@ where
         let iv = encrypted.get(0..16).unwrap_or(&[0u8; 16]);
         // Decrypt using the aes algorithm
         let mut data = encrypted.get(16..).map(|enc| enc.to_vec()).unwrap_or_default();
-        if data.len() % 16 != 0 {
+        if dbg!(data.len()) % 16 != 0  || data.len() == 0 {
+            // TODO pad
             Ok(data)
         } else {
             let pt = Aes128CbcDec::new(decryption_key.into(), iv.into()).decrypt_padded_mut::<Pkcs7>(&mut data)?;
-            println!("{:?}", String::from_utf8_lossy(pt));
+            println!("{}", String::from_utf8_lossy(&pt));
             Ok(pt.to_vec())
         }
     } else {
